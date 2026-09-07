@@ -7,10 +7,9 @@ import yt_dlp
 app = FastAPI(
     title="incsset Media Extractor API",
     description="High-speed non-blocking media & caption extraction API powered by yt-dlp",
-    version="1.2.0"
+    version="1.3.0"
 )
 
-# Enable CORS for all domains (Hostinger frontend support)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -37,7 +36,6 @@ def home():
 
 @app.get("/health")
 def health_check():
-    """Endpoint for 24/7 uptime pings via UptimeRobot"""
     return {"status": "ok", "uptime": "active"}
 
 @app.get("/api/extract")
@@ -47,82 +45,101 @@ def extract_media(url: str = Query(..., description="The media URL to extract"))
 
     raw_url = url.strip()
 
-    # yt-dlp extraction options with TV Embedded / Web Embedded clients to bypass datacenter bot detection
-    ydl_opts = {
+    # Base options for non-YouTube platforms (Instagram, TikTok, Pinterest, Twitter)
+    ydl_opts_base = {
         'quiet': True,
         'no_warnings': True,
         'no_playlist': True,
         'format': 'best',
         'extract_flat': False,
-        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['tv_embedded', 'web_embedded', 'android_creator', 'mweb']
-            }
-        },
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9',
-        }
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
     }
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(raw_url, download=False)
+    # YouTube specific client strategies to bypass cloud datacenter IP blocks
+    client_strategies = [
+        ['tv_embedded'],
+        ['web_embedded'],
+        ['android_creator'],
+        ['mweb'],
+        ['ios']
+    ]
+
+    last_error = ""
+
+    if "youtube.com" in raw_url.lower() or "youtu.be" in raw_url.lower():
+        # Try multiple player_client strategies until one succeeds
+        for client in client_strategies:
+            ydl_opts = ydl_opts_base.copy()
+            ydl_opts['extractor_args'] = {'youtube': {'player_client': client}}
             
-            if not info:
-                raise HTTPException(status_code=404, detail="Could not extract media info")
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(raw_url, download=False)
+                    if info:
+                        return process_info(info)
+            except Exception as e:
+                last_error = safe_str(e)
+                continue
 
-            # Extract formats
-            direct_video_url = info.get('url') or ""
-            title = safe_str(info.get('title') or "Video")
-            thumbnail = safe_str(info.get('thumbnail') or "")
-            duration = info.get('duration') or 0
-            description = safe_str(info.get('description') or info.get('caption') or "")
-            uploader = safe_str(info.get('uploader') or info.get('uploader_id') or "")
+        # Fallback error for YouTube
+        raise HTTPException(status_code=500, detail="YouTube is restricting datacenter cloud IP requests. Try Instagram/TikTok or try again shortly.")
 
-            # Check requested format streams
-            formats_list = []
-            if 'formats' in info:
-                for f in info['formats']:
-                    f_url = f.get('url')
-                    if not f_url:
-                        continue
-                    ext = f.get('ext') or 'mp4'
-                    vcodec = f.get('vcodec') or ''
-                    acodec = f.get('acodec') or ''
-                    resolution = f.get('format_note') or f.get('resolution') or f"{f.get('width', '')}x{f.get('height', '')}"
-                    
-                    formats_list.append({
-                        "url": f_url,
-                        "ext": ext,
-                        "resolution": resolution,
-                        "has_video": vcodec != 'none',
-                        "has_audio": acodec != 'none',
-                    })
+    else:
+        # Standard extraction for Instagram, TikTok, Pinterest, Twitter, etc.
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts_base) as ydl:
+                info = ydl.extract_info(raw_url, download=False)
+                if not info:
+                    raise HTTPException(status_code=404, detail="Could not extract media info")
+                return process_info(info)
+        except Exception as e:
+            err_msg = safe_str(e)
+            if "Unsupported URL" in err_msg:
+                raise HTTPException(status_code=400, detail="Unsupported platform or invalid link.")
+            raise HTTPException(status_code=500, detail=f"Extraction error: {err_msg}")
 
-            # Primary direct download link fallback
-            if not direct_video_url and formats_list:
-                combined = [f for f in formats_list if f['has_video'] and f['has_audio']]
-                if combined:
-                    direct_video_url = combined[-1]['url']
-                else:
-                    direct_video_url = formats_list[-1]['url']
 
-            return {
-                "success": True,
-                "title": title,
-                "thumbnail": thumbnail,
-                "duration": duration,
-                "uploader": uploader,
-                "caption": description[:1000],
-                "download_url": direct_video_url,
-                "formats": formats_list[:8]
-            }
+def process_info(info):
+    direct_video_url = info.get('url') or ""
+    title = safe_str(info.get('title') or "Video")
+    thumbnail = safe_str(info.get('thumbnail') or "")
+    duration = info.get('duration') or 0
+    description = safe_str(info.get('description') or info.get('caption') or "")
+    uploader = safe_str(info.get('uploader') or info.get('uploader_id') or "")
 
-    except Exception as e:
-        err_msg = safe_str(e)
-        if "Unsupported URL" in err_msg:
-            raise HTTPException(status_code=400, detail="Unsupported platform or invalid link.")
-        raise HTTPException(status_code=500, detail=f"Extraction error: {err_msg}")
+    formats_list = []
+    if 'formats' in info:
+        for f in info['formats']:
+            f_url = f.get('url')
+            if not f_url:
+                continue
+            ext = f.get('ext') or 'mp4'
+            vcodec = f.get('vcodec') or ''
+            acodec = f.get('acodec') or ''
+            resolution = f.get('format_note') or f.get('resolution') or f"{f.get('width', '')}x{f.get('height', '')}"
+            
+            formats_list.append({
+                "url": f_url,
+                "ext": ext,
+                "resolution": resolution,
+                "has_video": vcodec != 'none',
+                "has_audio": acodec != 'none',
+            })
+
+    if not direct_video_url and formats_list:
+        combined = [f for f in formats_list if f['has_video'] and f['has_audio']]
+        if combined:
+            direct_video_url = combined[-1]['url']
+        else:
+            direct_video_url = formats_list[-1]['url']
+
+    return {
+        "success": True,
+        "title": title,
+        "thumbnail": thumbnail,
+        "duration": duration,
+        "uploader": uploader,
+        "caption": description[:1000],
+        "download_url": direct_video_url,
+        "formats": formats_list[:8]
+    }
