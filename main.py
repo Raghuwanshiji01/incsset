@@ -7,7 +7,7 @@ import yt_dlp
 app = FastAPI(
     title="incsset Media Extractor API",
     description="High-speed non-blocking media & caption extraction API powered by yt-dlp",
-    version="1.0.0"
+    version="1.1.0"
 )
 
 # Enable CORS for all domains (Hostinger frontend support)
@@ -47,7 +47,7 @@ def extract_media(url: str = Query(..., description="The media URL to extract"))
 
     raw_url = url.strip()
 
-    # yt-dlp extraction options with User-Agent headers
+    # yt-dlp extraction options with Mobile/TV player clients to bypass YouTube bot detection
     ydl_opts = {
         'quiet': True,
         'no_warnings': True,
@@ -55,6 +55,11 @@ def extract_media(url: str = Query(..., description="The media URL to extract"))
         'format': 'best',
         'extract_flat': False,
         'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'ios', 'mweb', 'tv_embedded']
+            }
+        },
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
