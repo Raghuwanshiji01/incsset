@@ -47,13 +47,19 @@ def extract_media(url: str = Query(..., description="The media URL to extract"))
 
     raw_url = url.strip()
 
-    # yt-dlp extraction options (Fast, download=False, lightweight)
+    # yt-dlp extraction options with User-Agent headers
     ydl_opts = {
         'quiet': True,
         'no_warnings': True,
         'no_playlist': True,
         'format': 'best',
         'extract_flat': False,
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+        }
     }
 
     try:
@@ -105,9 +111,9 @@ def extract_media(url: str = Query(..., description="The media URL to extract"))
                 "thumbnail": thumbnail,
                 "duration": duration,
                 "uploader": uploader,
-                "caption": description[:1000],  # cap caption length for performance
+                "caption": description[:1000],
                 "download_url": direct_video_url,
-                "formats": formats_list[:8]  # top 8 formats
+                "formats": formats_list[:8]
             }
 
     except Exception as e:
