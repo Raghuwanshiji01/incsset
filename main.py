@@ -19,6 +19,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+def safe_str(val):
+    if not val:
+        return ""
+    if isinstance(val, str):
+        return val.encode('utf-8', 'ignore').decode('utf-8')
+    return str(val)
+
 @app.get("/")
 def home():
     return {
@@ -57,12 +64,12 @@ def extract_media(url: str = Query(..., description="The media URL to extract"))
                 raise HTTPException(status_code=404, detail="Could not extract media info")
 
             # Extract formats
-            direct_video_url = info.get('url')
-            title = info.get('title') or "Video"
-            thumbnail = info.get('thumbnail') or ""
+            direct_video_url = info.get('url') or ""
+            title = safe_str(info.get('title') or "Video")
+            thumbnail = safe_str(info.get('thumbnail') or "")
             duration = info.get('duration') or 0
-            description = info.get('description') or info.get('caption') or ""
-            uploader = info.get('uploader') or info.get('uploader_id') or ""
+            description = safe_str(info.get('description') or info.get('caption') or "")
+            uploader = safe_str(info.get('uploader') or info.get('uploader_id') or "")
 
             # Check requested format streams
             formats_list = []
@@ -86,7 +93,6 @@ def extract_media(url: str = Query(..., description="The media URL to extract"))
 
             # Primary direct download link fallback
             if not direct_video_url and formats_list:
-                # Pick best combined or video stream
                 combined = [f for f in formats_list if f['has_video'] and f['has_audio']]
                 if combined:
                     direct_video_url = combined[-1]['url']
@@ -99,13 +105,13 @@ def extract_media(url: str = Query(..., description="The media URL to extract"))
                 "thumbnail": thumbnail,
                 "duration": duration,
                 "uploader": uploader,
-                "caption": description,
+                "caption": description[:1000],  # cap caption length for performance
                 "download_url": direct_video_url,
                 "formats": formats_list[:8]  # top 8 formats
             }
 
     except Exception as e:
-        err_msg = str(e)
+        err_msg = safe_str(e)
         if "Unsupported URL" in err_msg:
             raise HTTPException(status_code=400, detail="Unsupported platform or invalid link.")
         raise HTTPException(status_code=500, detail=f"Extraction error: {err_msg}")
